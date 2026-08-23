@@ -8,7 +8,11 @@ class SDLVideo {
         SDLVideo();
         ~SDLVideo();
 
-        bool initialize();
+        bool initialize(
+            int width,
+            int height,
+            int scale = 3
+        );
 
         void present(const std::uint32_t* framebuffer);
 
@@ -16,4 +20,7 @@ class SDLVideo {
         SDL_Window* window_ = nullptr;
         SDL_Renderer* renderer_ = nullptr;
         SDL_Texture* texture_ = nullptr;
+
+        int width_ = 0;
+        int height_ = 0;
 };
