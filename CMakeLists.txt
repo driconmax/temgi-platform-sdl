@@ -17,7 +17,6 @@ add_executable(
     temgi-sdl
 
     src/main.cpp
-
     src/SDLPlatform.cpp
     src/SDLInput.cpp
     src/SDLVideo.cpp
@@ -41,4 +40,12 @@ target_link_libraries(
     PRIVATE
         ${TEMGI_SDK}/lib/libtemgi.a
         SDL3::SDL3
+)
+
+# Export TEMGI symbols so dynamically loaded cartridges
+# can resolve Console/Graphics/Input/etc. from this executable.
+set_target_properties(
+    temgi-sdl
+    PROPERTIES
+        ENABLE_EXPORTS ON
 )
