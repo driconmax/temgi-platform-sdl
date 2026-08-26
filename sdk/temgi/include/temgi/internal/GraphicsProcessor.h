@@ -5,6 +5,7 @@
 
 #include <temgi/ConsoleSpec.h>
 #include <temgi/Image.h>
+#include <temgi/Animation.h>
 
 namespace temgi
 {
@@ -23,6 +24,8 @@ namespace temgi
                 std::uint16_t x,
                 std::uint16_t y
             );
+
+            void drawAnimationFrame(const Animation& animation, std::uint16_t frame, std::uint16_t x, std::uint16_t y);
 
             const Pixel* framebuffer() const;
 

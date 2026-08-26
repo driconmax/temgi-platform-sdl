@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <temgi/Image.h>
+#include <temgi/Animation.h>
 
 namespace temgi
 {
@@ -31,6 +32,13 @@ namespace temgi
 
         void drawImage(
             const Image& image,
+            std::uint16_t x,
+            std::uint16_t y
+        );
+
+        void drawAnimationFrame(
+            const Animation& animation,
+            std::uint16_t frame,
             std::uint16_t x,
             std::uint16_t y
         );
