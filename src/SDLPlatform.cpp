@@ -17,15 +17,7 @@ void SDLPlatform::onConsoleStop()
 
 void SDLPlatform::onFrameStart()
 {
-    SDL_Event event;
-
-    while (SDL_PollEvent(&event))
-    {
-        if (event.type == SDL_EVENT_QUIT)
-        {
-            console_.stop();
-        }
-    }
+    input_.update();
 }
 
 void SDLPlatform::onFrameEnd()
