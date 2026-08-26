@@ -149,7 +149,7 @@ void SDLVideo::present(const std::uint8_t *framebuffer)
             convertColor(framebuffer[i]);
     }
 
-    SDL_UpdateTexture(texture_, nullptr, framebuffer, width_ * sizeof(std::uint32_t));
+    SDL_UpdateTexture(texture_, nullptr, rgbaBuffer_.data(), width_ * sizeof(std::uint32_t));
 
     SDL_RenderClear(renderer_);
 
