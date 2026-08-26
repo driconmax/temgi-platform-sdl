@@ -13,7 +13,7 @@ namespace temgi
             virtual void pollEvents() = 0;
             virtual bool isButtonPressed(Button button) const = 0;
             virtual void presentFrame(
-                const std::uint32_t * pixels,
+                const std::uint8_t * pixels,
                 int width,
                 int height
             ) = 0;

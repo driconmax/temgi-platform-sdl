@@ -34,7 +34,7 @@ namespace temgi
 
             void setButton(Button button, bool pressed);
 
-            const std::uint32_t* frameBuffer() const;
+            const std::uint8_t* frameBuffer() const;
             
         private:
             Input input_;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 #include <SDL3/SDL.h>
 
 class SDLVideo {
