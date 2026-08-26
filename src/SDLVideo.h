@@ -14,7 +14,7 @@ class SDLVideo {
             int scale = 3
         );
 
-        void present(const std::uint32_t* framebuffer);
+        void present(const std::uint8_t* framebuffer);
 
     private:
         SDL_Window* window_ = nullptr;
@@ -23,4 +23,7 @@ class SDLVideo {
 
         int width_ = 0;
         int height_ = 0;
+
+        std::vector<std::uint32_t> rgbaBuffer_;
+        std::uint32_t convertColor(std::uint8_t color) const;
 };
