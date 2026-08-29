@@ -27,6 +27,9 @@ namespace temgi
 
             void drawAnimationFrame(const Animation& animation, std::uint16_t frame, std::uint16_t x, std::uint16_t y);
 
+            void drawChar(char character, std::uint16_t x, std::uint16_t y, Pixel color);
+            void drawText(const std::string& text, std::uint16_t x, std::uint16_t y, Pixel color);
+
             const Pixel* framebuffer() const;
 
         private:

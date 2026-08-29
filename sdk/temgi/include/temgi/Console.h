@@ -36,6 +36,8 @@ namespace temgi
 
             void setButton(Button button, bool pressed);
 
+            void fatalError(const std::string& message);
+
             const std::uint8_t* frameBuffer() const;
             
         private:
@@ -49,8 +51,12 @@ namespace temgi
 
             CartridgeLoader cartridgeLoader_;
 
+            bool failed_ = false;
             bool running_ = false;
             void update(float deltaTime);
+
+            std::string errorMessage_;
+            void drawErrorOverlay();
 
             std::vector<ConsoleEventSubscriber*> subscribers_;
     };

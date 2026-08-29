@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <temgi/Image.h>
 #include <temgi/Animation.h>
@@ -41,6 +42,13 @@ namespace temgi
             std::uint16_t frame,
             std::uint16_t x,
             std::uint16_t y
+        );
+
+        void drawText(
+            const std::string& text,
+            std::uint16_t x,
+            std::uint16_t y,
+            Pixel color
         );
 
         const Pixel* frameBuffer() const;
