@@ -6,6 +6,7 @@
 #include <temgi/ConsoleSpec.h>
 #include <temgi/Image.h>
 #include <temgi/Animation.h>
+#include <temgi/Font.h>
 
 namespace temgi
 {
@@ -27,8 +28,9 @@ namespace temgi
 
             void drawAnimationFrame(const Animation& animation, std::uint16_t frame, std::uint16_t x, std::uint16_t y);
 
-            void drawChar(char character, std::uint16_t x, std::uint16_t y, Pixel color);
+            void drawChar(char character, std::uint16_t x, std::uint16_t y, Pixel color, const Font& font);
             void drawText(const std::string& text, std::uint16_t x, std::uint16_t y, Pixel color);
+            void drawText(const std::string& text, std::uint16_t x, std::uint16_t y, Pixel color, const Font& font);
 
             const Pixel* framebuffer() const;
 
