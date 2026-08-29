@@ -36,6 +36,7 @@ namespace temgi
 
             void setButton(Button button, bool pressed);
 
+            void error(const std::string& message);
             void fatalError(const std::string& message);
 
             const std::uint8_t* frameBuffer() const;
@@ -52,6 +53,7 @@ namespace temgi
             CartridgeLoader cartridgeLoader_;
 
             bool failed_ = false;
+            bool error_ = false;
             bool running_ = false;
             void update(float deltaTime);
 
@@ -59,6 +61,13 @@ namespace temgi
             void drawErrorOverlay();
 
             std::vector<ConsoleEventSubscriber*> subscribers_;
+
+            std::uint16_t systemCursorY_ = 8;
+
+            void systemClear();
+            void systemPrint(const std::string& text);
+            void systemPrintLine(const std::string& text);
+            void presentSystemFrame();
     };
     
 } // namespace temgi
