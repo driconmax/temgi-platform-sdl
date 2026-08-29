@@ -29,6 +29,8 @@ namespace temgi
             bool loadCartridge(const std::string& path);
             void unloadCartridge();
 
+            Asset asset(const std::string& name) const;
+
             void run();
             void stop();
 
