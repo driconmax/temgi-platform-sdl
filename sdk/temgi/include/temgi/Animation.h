@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <temgi/PixelFormat.h>
+
 namespace temgi
 {
     struct Animation
@@ -10,6 +12,6 @@ namespace temgi
         std::uint16_t height;
         std::uint16_t frameCount;
 
-        const std::uint8_t* pixels;
+        const PixelStorage* pixels;
     };
 }

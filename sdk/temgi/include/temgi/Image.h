@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include <temgi/PixelFormat.h>
+
 namespace temgi
 {
     struct Image
@@ -9,6 +11,6 @@ namespace temgi
         std::uint16_t width;
         std::uint16_t height;
 
-        const std::uint8_t* pixels;
+        const PixelStorage* pixels;
     };
 }

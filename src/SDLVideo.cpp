@@ -78,8 +78,29 @@ bool SDLVideo::initialize(int width, int height, int scale)
     return true;
 }
 
-std::uint32_t SDLVideo::convertColor(std::uint8_t color) const
+std::uint32_t SDLVideo::convertColor(temgi::Graphics::Pixel color) const
 {
+#if defined(TEMGI_PIXEL_RGB565)
+    // 0x0000 Transparent/Black
+    if (color == 0x0000)
+    {
+        return 0x000000FF;
+    }
+
+    const std::uint8_t r5 = static_cast<std::uint8_t>((color >> 11) & 0x1F);
+    const std::uint8_t g6 = static_cast<std::uint8_t>((color >> 5) & 0x3F);
+    const std::uint8_t b5 = static_cast<std::uint8_t>(color & 0x1F);
+
+    const std::uint8_t r = static_cast<std::uint8_t>((r5 * 255) / 31);
+    const std::uint8_t g = static_cast<std::uint8_t>((g6 * 255) / 63);
+    const std::uint8_t b = static_cast<std::uint8_t>((b5 * 255) / 31);
+
+    return
+        (static_cast<std::uint32_t>(r) << 24) |
+        (static_cast<std::uint32_t>(g) << 16) |
+        (static_cast<std::uint32_t>(b) << 8)  |
+        0xFF;
+#else
     // 0x00 Transparent/Black
     if (color == 0x00)
     {
@@ -137,9 +158,10 @@ std::uint32_t SDLVideo::convertColor(std::uint8_t color) const
         (static_cast<std::uint32_t>(value) << 16) |
         (static_cast<std::uint32_t>(value) << 8) |
         0xFF;
+#endif
 }
 
-void SDLVideo::present(const std::uint8_t *framebuffer)
+void SDLVideo::present(const temgi::Graphics::Pixel *framebuffer)
 {
     const std::size_t pixelCount = static_cast<std::size_t>(width_) * static_cast<std::size_t>(height_);
 

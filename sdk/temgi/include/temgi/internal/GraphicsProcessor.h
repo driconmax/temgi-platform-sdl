@@ -7,6 +7,7 @@
 #include <temgi/Image.h>
 #include <temgi/Animation.h>
 #include <temgi/Font.h>
+#include <temgi/PixelFormat.h>
 
 namespace temgi
 {
@@ -14,7 +15,7 @@ namespace temgi
     {
         
         public:
-            using Pixel = std::uint8_t;
+            using Pixel = PixelStorage;
             
             void clear(Pixel color);
             void setPixel(std::uint16_t x, std::uint16_t y, Pixel color);

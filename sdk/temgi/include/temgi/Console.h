@@ -39,7 +39,7 @@ namespace temgi
             void error(const std::string& message);
             void fatalError(const std::string& message);
 
-            const std::uint8_t* frameBuffer() const;
+            const Graphics::Pixel* frameBuffer() const;
             
         private:
             Input input_;

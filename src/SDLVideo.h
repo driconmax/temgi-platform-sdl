@@ -4,6 +4,8 @@
 #include <vector>
 #include <SDL3/SDL.h>
 
+#include <temgi/Graphics.h>
+
 class SDLVideo {
     public:
         SDLVideo();
@@ -15,7 +17,7 @@ class SDLVideo {
             int scale = 3
         );
 
-        void present(const std::uint8_t* framebuffer);
+        void present(const temgi::Graphics::Pixel* framebuffer);
 
     private:
         SDL_Window* window_ = nullptr;
@@ -26,5 +28,5 @@ class SDLVideo {
         int height_ = 0;
 
         std::vector<std::uint32_t> rgbaBuffer_;
-        std::uint32_t convertColor(std::uint8_t color) const;
+        std::uint32_t convertColor(temgi::Graphics::Pixel color) const;
 };
