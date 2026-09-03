@@ -147,14 +147,31 @@ void SDLInput::rumble(int controllerIndex, float lowFrequency, float highFrequen
 
 bool SDLInput::supportsAdaptiveTriggers(int /*controllerIndex*/) const
 {
-    // Plain SDL gamepads have no adaptive trigger API; only a Steam Input
-    // backend (DualSense) would report true here.
+    // Plain SDL gamepads have no adaptive *resistance* API; only a Steam Input
+    // backend (DualSense) would report true here. Vibration is still handled
+    // below via the triggers' dedicated rumble motors.
     return false;
 }
 
-void SDLInput::setTriggerEffect(int /*controllerIndex*/, temgi::Trigger /*trigger*/, const temgi::TriggerEffect& /*effect*/)
+void SDLInput::setTriggerEffect(int controllerIndex, temgi::Trigger trigger, const temgi::TriggerEffect& effect)
 {
-    // No-op: nothing to do without hardware/API support for trigger feedback.
+    if (controllerIndex < 0 || controllerIndex >= MAX_CONTROLLERS) return;
+
+    SDL_Gamepad* gamepad = gamepads_[static_cast<std::size_t>(controllerIndex)];
+    if (gamepad == nullptr) return;
+
+    // True adaptive resistance needs Sony's proprietary output report (Steam
+    // Input territory); SDL only exposes the triggers' own rumble motors,
+    // which is enough to fake a vibration/pulse effect.
+    if (effect.type != temgi::TriggerEffectType::Vibration) return;
+
+    const Uint16 strength = static_cast<Uint16>(std::clamp(effect.strength, 0.0f, 1.0f) * 0xFFFF);
+    constexpr Uint32 DURATION_MS = 120;
+
+    const Uint16 left = (trigger == temgi::Trigger::Left) ? strength : 0;
+    const Uint16 right = (trigger == temgi::Trigger::Right) ? strength : 0;
+
+    SDL_RumbleGamepadTriggers(gamepad, left, right, DURATION_MS);
 }
 
 void SDLInput::handleGamepadAdded(SDL_JoystickID id)
