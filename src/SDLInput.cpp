@@ -253,18 +253,32 @@ void SDLInput::setTriggerEffect(int controllerIndex, temgi::Trigger trigger, con
     Uint8& amp = isRight ? state.rightAmp : state.leftAmp;
     Uint8& freq = isRight ? state.rightFreq : state.leftFreq;
 
+    Uint8 newMode, newPos, newAmp, newFreq;
+
     if (effect.type == temgi::TriggerEffectType::Vibration)
     {
-        mode = TRIGGER_MODE_VIBRATION;
-        pos = TRIGGER_EFFECT_POSITION;
-        amp = toByteValue(effect.strength);
-        freq = scaleTriggerFrequency(effect.frequency);
+        newMode = TRIGGER_MODE_VIBRATION;
+        newPos = TRIGGER_EFFECT_POSITION;
+        newAmp = toByteValue(effect.strength);
+        newFreq = scaleTriggerFrequency(effect.frequency);
     }
     else
     {
-        mode = TRIGGER_MODE_OFF;
-        pos = amp = freq = 0;
+        newMode = TRIGGER_MODE_OFF;
+        newPos = newAmp = newFreq = 0;
     }
+
+    // MineScene resends the "same" effect every frame while drilling. The
+    // DualSense's own oscillator runs far slower (tens of ms per cycle) than
+    // our frame rate, so re-sending unchanged bytes constantly restarts it
+    // before it can complete a cycle - which is exactly why the felt speed
+    // never changed with drillFps. Only push a new report when it differs.
+    if (mode == newMode && pos == newPos && amp == newAmp && freq == newFreq) return;
+
+    mode = newMode;
+    pos = newPos;
+    amp = newAmp;
+    freq = newFreq;
 
     sendEffects(controllerIndex);
 }
