@@ -38,6 +38,27 @@ namespace
         constexpr float MAX = 32767.0f;
         return std::clamp(static_cast<float>(value) / MAX, 0.0f, 1.0f);
     }
+
+    constexpr float TRIGGER_PRESS_THRESHOLD = 0.35f;
+
+    // Existing game code only reads the legacy Button enum; South/Start/Select/
+    // Dpad/right shoulder map straight across (right trigger is handled separately
+    // since it also doubles as the mining button).
+    bool mapLegacyButton(SDL_GamepadButton button, temgi::Button& out)
+    {
+        switch (button)
+        {
+            case SDL_GAMEPAD_BUTTON_EAST: out = temgi::Button::B; return true;
+            case SDL_GAMEPAD_BUTTON_START: out = temgi::Button::Start; return true;
+            case SDL_GAMEPAD_BUTTON_BACK: out = temgi::Button::Select; return true;
+            case SDL_GAMEPAD_BUTTON_DPAD_UP: out = temgi::Button::Up; return true;
+            case SDL_GAMEPAD_BUTTON_DPAD_DOWN: out = temgi::Button::Down; return true;
+            case SDL_GAMEPAD_BUTTON_DPAD_LEFT: out = temgi::Button::Left; return true;
+            case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: out = temgi::Button::Right; return true;
+            case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: out = temgi::Button::R1; return true;
+            default: return false;
+        }
+    }
 }
 
 SDLInput::SDLInput(temgi::Console &console) : console_(console)
@@ -162,6 +183,13 @@ void SDLInput::handleGamepadRemoved(SDL_JoystickID id)
     gamepads_[static_cast<std::size_t>(slot)] = nullptr;
     gamepadIds_[static_cast<std::size_t>(slot)] = 0;
     console_.setControllerConnected(slot, false);
+
+    if (slot == 0)
+    {
+        legacySouthHeld_ = false;
+        legacyRightTriggerHeld_ = false;
+        updateLegacyDrillButton();
+    }
 }
 
 void SDLInput::handleGamepadButton(SDL_JoystickID id, SDL_GamepadButton button, bool pressed)
@@ -170,9 +198,30 @@ void SDLInput::handleGamepadButton(SDL_JoystickID id, SDL_GamepadButton button, 
     if (slot < 0) return;
 
     temgi::ControllerButton mapped;
-    if (!mapButton(button, mapped)) return;
+    if (mapButton(button, mapped))
+    {
+        console_.setControllerButton(slot, mapped, pressed);
+    }
 
-    console_.setControllerButton(slot, mapped, pressed);
+    if (slot != 0) return;
+
+    if (button == SDL_GAMEPAD_BUTTON_SOUTH)
+    {
+        legacySouthHeld_ = pressed;
+        updateLegacyDrillButton();
+        return;
+    }
+
+    temgi::Button legacy;
+    if (mapLegacyButton(button, legacy))
+    {
+        console_.setButton(legacy, pressed);
+    }
+}
+
+void SDLInput::updateLegacyDrillButton()
+{
+    console_.setButton(temgi::Button::A, legacySouthHeld_ || legacyRightTriggerHeld_);
 }
 
 void SDLInput::handleGamepadAxis(SDL_JoystickID id, SDL_GamepadAxis axis, Sint16 value)
@@ -203,8 +252,22 @@ void SDLInput::handleGamepadAxis(SDL_JoystickID id, SDL_GamepadAxis axis, Sint16
             break;
 
         case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
-            console_.setControllerAxis(slot, temgi::ControllerAxis::RightTrigger, normalizeTriggerAxis(value));
+        {
+            const float normalized = normalizeTriggerAxis(value);
+            console_.setControllerAxis(slot, temgi::ControllerAxis::RightTrigger, normalized);
+
+            // Right trigger doubles as the mining button (Button::A) for slot 0.
+            if (slot == 0)
+            {
+                const bool held = normalized > TRIGGER_PRESS_THRESHOLD;
+                if (held != legacyRightTriggerHeld_)
+                {
+                    legacyRightTriggerHeld_ = held;
+                    updateLegacyDrillButton();
+                }
+            }
             break;
+        }
 
         default:
             break;

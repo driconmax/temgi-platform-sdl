@@ -30,6 +30,12 @@ class SDLInput : public temgi::ControllerBackend
         std::array<SDL_Gamepad*, MAX_CONTROLLERS> gamepads_{};
         std::array<SDL_JoystickID, MAX_CONTROLLERS> gamepadIds_{};
 
+        // Slot 0 also drives the legacy keyboard-style Button enum, since existing
+        // game code only reads console.input().pressed(Button::...), not Controller.
+        bool legacySouthHeld_ = false;
+        bool legacyRightTriggerHeld_ = false;
+        void updateLegacyDrillButton();
+
         void processKey(SDL_Scancode key, bool pressed);
 
         void handleGamepadAdded(SDL_JoystickID id);
