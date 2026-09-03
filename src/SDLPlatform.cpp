@@ -9,6 +9,7 @@ SDLPlatform::SDLPlatform(temgi::Console &console) :
 void SDLPlatform::onConsoleStart()
 {
     video_.initialize(temgi::ConsoleSpec::SCREEN_WIDTH, temgi::ConsoleSpec::SCREEN_HEIGHT, 3);
+    input_.initialize();
 }
 
 void SDLPlatform::onConsoleStop()

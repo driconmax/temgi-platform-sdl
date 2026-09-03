@@ -8,6 +8,8 @@
 #include <temgi/Memory.h>
 #include <temgi/Graphics.h>
 #include <temgi/ConsoleEventSubscriber.h>
+#include <temgi/Controller.h>
+#include <temgi/ControllerBackend.h>
 
 #include <temgi/internal/MemoryManager.h>
 #include <temgi/internal/GraphicsProcessor.h>
@@ -35,6 +37,13 @@ namespace temgi
             void stop();
 
             void setButton(Button button, bool pressed);
+
+            // Registered by the platform layer (e.g. SDLInput) so Controller::rumble()/trigger()
+            // calls have somewhere to go; the console itself stays backend-agnostic.
+            void setControllerBackend(ControllerBackend* backend);
+            void setControllerConnected(int index, bool connected);
+            void setControllerButton(int index, ControllerButton button, bool pressed);
+            void setControllerAxis(int index, ControllerAxis axis, float value);
 
             void error(const std::string& message);
             void fatalError(const std::string& message);
