@@ -54,6 +54,26 @@ namespace
     constexpr Uint8 TRIGGER_MODE_VIBRATION = 0x06;
     constexpr Uint8 TRIGGER_EFFECT_POSITION = 3;
 
+    // The DualSense's vibration mode byte3 behaves like a coarse rate index,
+    // not raw Hz - the confirmed-felt test value was 8 out of a small usable
+    // band, so game-side frequencies (e.g. drillFps, which can run well past
+    // that) are rescaled down into this band instead of being sent as-is.
+    constexpr float TRIGGER_FREQ_INPUT_MAX = 60.0f;
+    constexpr Uint8 TRIGGER_FREQ_OUTPUT_MIN = 4;
+    constexpr Uint8 TRIGGER_FREQ_OUTPUT_MAX = 24;
+
+    Uint8 scaleTriggerFrequency(float frequency)
+    {
+        const float t = std::clamp(frequency, 0.0f, TRIGGER_FREQ_INPUT_MAX) / TRIGGER_FREQ_INPUT_MAX;
+        const float scaled = TRIGGER_FREQ_OUTPUT_MIN + t * (TRIGGER_FREQ_OUTPUT_MAX - TRIGGER_FREQ_OUTPUT_MIN);
+        return static_cast<Uint8>(scaled);
+    }
+
+    Uint8 toByteValue(float normalized)
+    {
+        return static_cast<Uint8>(std::clamp(normalized, 0.0f, 1.0f) * 255.0f);
+    }
+
     // Existing game code only reads the legacy Button enum; South/Start/Select/
     // Dpad/right shoulder map straight across (right trigger is handled separately
     // since it also doubles as the mining button).
@@ -80,12 +100,25 @@ SDLInput::SDLInput(temgi::Console &console) : console_(console)
 
 SDLInput::~SDLInput()
 {
+    clearAllEffects();
+
     for (SDL_Gamepad* gamepad : gamepads_)
     {
         if (gamepad != nullptr)
         {
             SDL_CloseGamepad(gamepad);
         }
+    }
+}
+
+void SDLInput::clearAllEffects()
+{
+    for (int i = 0; i < MAX_CONTROLLERS; ++i)
+    {
+        if (gamepads_[static_cast<std::size_t>(i)] == nullptr) continue;
+
+        effects_[static_cast<std::size_t>(i)] = GamepadEffects{};
+        sendEffects(i);
     }
 }
 
@@ -139,6 +172,8 @@ void SDLInput::update()
                 break;
         }
     }
+
+    decayRumble();
 }
 
 void SDLInput::rumble(int controllerIndex, float lowFrequency, float highFrequency)
@@ -148,14 +183,47 @@ void SDLInput::rumble(int controllerIndex, float lowFrequency, float highFrequen
     SDL_Gamepad* gamepad = gamepads_[static_cast<std::size_t>(controllerIndex)];
     if (gamepad == nullptr) return;
 
-    constexpr Uint32 RUMBLE_DURATION_MS = 200;
+    // Non-DualSense pads have no trigger-effect report to race with, so SDL's
+    // own timed rumble is fine as-is.
+    if (SDL_GetGamepadType(gamepad) != SDL_GAMEPAD_TYPE_PS5)
+    {
+        constexpr Uint32 RUMBLE_DURATION_MS = 200;
+        SDL_RumbleGamepad(
+            gamepad,
+            static_cast<Uint16>(std::clamp(lowFrequency, 0.0f, 1.0f) * 0xFFFF),
+            static_cast<Uint16>(std::clamp(highFrequency, 0.0f, 1.0f) * 0xFFFF),
+            RUMBLE_DURATION_MS
+        );
+        return;
+    }
 
-    SDL_RumbleGamepad(
-        gamepad,
-        static_cast<Uint16>(std::clamp(lowFrequency, 0.0f, 1.0f) * 0xFFFF),
-        static_cast<Uint16>(std::clamp(highFrequency, 0.0f, 1.0f) * 0xFFFF),
-        RUMBLE_DURATION_MS
-    );
+    // DualSense: rumble and trigger effects share one output report, so track
+    // both and always resend the combined state (see sendEffects()) instead of
+    // letting SDL's own rumble call clobber our trigger bytes back to zero.
+    constexpr Uint32 RUMBLE_HOLD_MS = 200;
+
+    GamepadEffects& state = effects_[static_cast<std::size_t>(controllerIndex)];
+    state.rumbleLow = toByteValue(lowFrequency);
+    state.rumbleHigh = toByteValue(highFrequency);
+    state.rumbleExpireTicks = (state.rumbleLow != 0 || state.rumbleHigh != 0) ? (SDL_GetTicks() + RUMBLE_HOLD_MS) : 0;
+
+    sendEffects(controllerIndex);
+}
+
+void SDLInput::decayRumble()
+{
+    const Uint64 now = SDL_GetTicks();
+
+    for (int i = 0; i < MAX_CONTROLLERS; ++i)
+    {
+        GamepadEffects& state = effects_[static_cast<std::size_t>(i)];
+        if (state.rumbleExpireTicks == 0 || now < state.rumbleExpireTicks) continue;
+
+        state.rumbleLow = 0;
+        state.rumbleHigh = 0;
+        state.rumbleExpireTicks = 0;
+        sendEffects(i);
+    }
 }
 
 bool SDLInput::supportsAdaptiveTriggers(int controllerIndex) const
@@ -175,25 +243,66 @@ void SDLInput::setTriggerEffect(int controllerIndex, temgi::Trigger trigger, con
 
     SDL_Gamepad* gamepad = gamepads_[static_cast<std::size_t>(controllerIndex)];
     if (gamepad == nullptr) return;
-
-    Uint8 data[47] = {0};
+    if (SDL_GetGamepadType(gamepad) != SDL_GAMEPAD_TYPE_PS5) return;
 
     const bool isRight = (trigger == temgi::Trigger::Right);
-    const int offset = isRight ? TRIGGER_REPORT_OFFSET_RIGHT : TRIGGER_REPORT_OFFSET_LEFT;
+    GamepadEffects& state = effects_[static_cast<std::size_t>(controllerIndex)];
 
-    data[0] = isRight ? TRIGGER_ENABLE_RIGHT : TRIGGER_ENABLE_LEFT;
+    Uint8& mode = isRight ? state.rightMode : state.leftMode;
+    Uint8& pos = isRight ? state.rightPos : state.leftPos;
+    Uint8& amp = isRight ? state.rightAmp : state.leftAmp;
+    Uint8& freq = isRight ? state.rightFreq : state.leftFreq;
 
     if (effect.type == temgi::TriggerEffectType::Vibration)
     {
-        data[offset] = TRIGGER_MODE_VIBRATION;
-        data[offset + 1] = TRIGGER_EFFECT_POSITION;
-        data[offset + 2] = static_cast<Uint8>(std::clamp(effect.strength, 0.0f, 1.0f) * 255.0f);
-        data[offset + 3] = static_cast<Uint8>(std::clamp(effect.frequency, 0.0f, 255.0f));
+        mode = TRIGGER_MODE_VIBRATION;
+        pos = TRIGGER_EFFECT_POSITION;
+        amp = toByteValue(effect.strength);
+        freq = scaleTriggerFrequency(effect.frequency);
     }
     else
     {
-        data[offset] = TRIGGER_MODE_OFF;
+        mode = TRIGGER_MODE_OFF;
+        pos = amp = freq = 0;
     }
+
+    sendEffects(controllerIndex);
+}
+
+void SDLInput::sendEffects(int controllerIndex)
+{
+    if (controllerIndex < 0 || controllerIndex >= MAX_CONTROLLERS) return;
+
+    SDL_Gamepad* gamepad = gamepads_[static_cast<std::size_t>(controllerIndex)];
+    if (gamepad == nullptr) return;
+
+    const GamepadEffects& state = effects_[static_cast<std::size_t>(controllerIndex)];
+
+    Uint8 data[47] = {0};
+    Uint8 enableBits = 0;
+
+    if (state.rumbleLow != 0 || state.rumbleHigh != 0)
+    {
+        enableBits |= 0x01; // classic rumble emulation
+        enableBits |= 0x02; // disable audio haptics
+        data[2] = state.rumbleHigh; // ucRumbleRight
+        data[3] = state.rumbleLow;  // ucRumbleLeft
+    }
+
+    if (state.rightMode != TRIGGER_MODE_OFF) enableBits |= TRIGGER_ENABLE_RIGHT;
+    if (state.leftMode != TRIGGER_MODE_OFF) enableBits |= TRIGGER_ENABLE_LEFT;
+
+    data[0] = enableBits;
+
+    data[TRIGGER_REPORT_OFFSET_RIGHT + 0] = state.rightMode;
+    data[TRIGGER_REPORT_OFFSET_RIGHT + 1] = state.rightPos;
+    data[TRIGGER_REPORT_OFFSET_RIGHT + 2] = state.rightAmp;
+    data[TRIGGER_REPORT_OFFSET_RIGHT + 3] = state.rightFreq;
+
+    data[TRIGGER_REPORT_OFFSET_LEFT + 0] = state.leftMode;
+    data[TRIGGER_REPORT_OFFSET_LEFT + 1] = state.leftPos;
+    data[TRIGGER_REPORT_OFFSET_LEFT + 2] = state.leftAmp;
+    data[TRIGGER_REPORT_OFFSET_LEFT + 3] = state.leftFreq;
 
     SDL_SendGamepadEffect(gamepad, data, sizeof(data));
 }
@@ -209,6 +318,8 @@ void SDLInput::handleGamepadAdded(SDL_JoystickID id)
 
             gamepads_[static_cast<std::size_t>(i)] = gamepad;
             gamepadIds_[static_cast<std::size_t>(i)] = id;
+            effects_[static_cast<std::size_t>(i)] = GamepadEffects{};
+            sendEffects(i); // known-clean slate in case hardware had leftover state (e.g. previous crashed run)
             console_.setControllerConnected(i, true);
             return;
         }

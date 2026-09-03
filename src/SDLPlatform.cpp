@@ -14,6 +14,7 @@ void SDLPlatform::onConsoleStart()
 
 void SDLPlatform::onConsoleStop()
 {
+    input_.clearAllEffects();
 }
 
 void SDLPlatform::onFrameStart()
