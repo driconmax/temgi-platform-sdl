@@ -50,23 +50,35 @@ namespace
     constexpr Uint8 TRIGGER_ENABLE_LEFT = 0x08;
     constexpr int TRIGGER_REPORT_OFFSET_RIGHT = 10;
     constexpr int TRIGGER_REPORT_OFFSET_LEFT = 21;
-    constexpr Uint8 TRIGGER_MODE_OFF = 0x00;
-    constexpr Uint8 TRIGGER_MODE_VIBRATION = 0x06;
+
+    // Mode 0x06 ("Vibration") turned out to have its OWN fixed internal buzz
+    // rate baked into the firmware - toggling it on/off with our own timer just
+    // flickers a fixed-rate buzz, it doesn't change its speed (verified by hand
+    // across every documented mode: they all felt identical regardless of the
+    // "frequency" byte). Mode 0x01 ("Feedback") is a static, non-oscillating
+    // constant resistance with no internal timing at all - so toggling THAT on
+    // and off makes our own software timer the only source of any pulsing,
+    // giving us genuine control over the perceived speed.
+    constexpr Uint8 TRIGGER_MODE_OFF = 0x00; // per pydualsense's TriggerModes.Off - explicit release, not just "don't touch"
+    constexpr Uint8 TRIGGER_MODE_FEEDBACK = 0x01;
     constexpr Uint8 TRIGGER_EFFECT_POSITION = 3;
 
-    // The DualSense's vibration mode byte3 behaves like a coarse rate index,
-    // not raw Hz - the confirmed-felt test value was 8 out of a small usable
-    // band, so game-side frequencies (e.g. drillFps, which can run well past
-    // that) are rescaled down into this band instead of being sent as-is.
-    constexpr float TRIGGER_FREQ_INPUT_MAX = 60.0f;
-    constexpr Uint8 TRIGGER_FREQ_OUTPUT_MIN = 4;
-    constexpr Uint8 TRIGGER_FREQ_OUTPUT_MAX = 24;
+    // A fast on/off toggle of a static resistance isn't felt at all - your
+    // finger needs the resistance held for a bit to register it as a push.
+    // So instead of a symmetric buzz, we pulse it as short, fixed-duration
+    // "knocks" (long enough to actually feel) separated by a gap whose length
+    // tracks the game's requested frequency - the gap shrinking is what makes
+    // the knock rate speed up with drillFps.
+    constexpr Uint64 KNOCK_ON_MS = 70;
+    constexpr float KNOCK_RATE_INPUT_MAX = 60.0f; // roughly the game's max drillFps
+    constexpr float KNOCK_RATE_MIN = 1.5f; // knocks/sec at the slowest drill speed
+    constexpr float KNOCK_RATE_MAX = 8.0f; // knocks/sec at the fastest drill speed
 
-    Uint8 scaleTriggerFrequency(float frequency)
+    float scaleKnockPeriodMs(float frequency)
     {
-        const float t = std::clamp(frequency, 0.0f, TRIGGER_FREQ_INPUT_MAX) / TRIGGER_FREQ_INPUT_MAX;
-        const float scaled = TRIGGER_FREQ_OUTPUT_MIN + t * (TRIGGER_FREQ_OUTPUT_MAX - TRIGGER_FREQ_OUTPUT_MIN);
-        return static_cast<Uint8>(scaled);
+        const float t = std::clamp(frequency, 0.0f, KNOCK_RATE_INPUT_MAX) / KNOCK_RATE_INPUT_MAX;
+        const float knocksPerSecond = KNOCK_RATE_MIN + t * (KNOCK_RATE_MAX - KNOCK_RATE_MIN);
+        return 1000.0f / knocksPerSecond;
     }
 
     Uint8 toByteValue(float normalized)
@@ -116,6 +128,18 @@ void SDLInput::clearAllEffects()
     for (int i = 0; i < MAX_CONTROLLERS; ++i)
     {
         if (gamepads_[static_cast<std::size_t>(i)] == nullptr) continue;
+
+        GamepadEffects& state = effects_[static_cast<std::size_t>(i)];
+
+        // Force an explicit release first: an unset trigger-enable bit means
+        // "don't touch", not "off", so simply zeroing our state and resending
+        // would leave a mid-flight resistance stuck on the hardware.
+        state.rumbleLow = 0;
+        state.rumbleHigh = 0;
+        state.rumbleExpireTicks = 0;
+        state.rightPulseOn = false;
+        state.leftPulseOn = false;
+        sendEffects(i);
 
         effects_[static_cast<std::size_t>(i)] = GamepadEffects{};
         sendEffects(i);
@@ -174,6 +198,7 @@ void SDLInput::update()
     }
 
     decayRumble();
+    updateTriggerPulses();
 }
 
 void SDLInput::rumble(int controllerIndex, float lowFrequency, float highFrequency)
@@ -248,39 +273,69 @@ void SDLInput::setTriggerEffect(int controllerIndex, temgi::Trigger trigger, con
     const bool isRight = (trigger == temgi::Trigger::Right);
     GamepadEffects& state = effects_[static_cast<std::size_t>(controllerIndex)];
 
-    Uint8& mode = isRight ? state.rightMode : state.leftMode;
-    Uint8& pos = isRight ? state.rightPos : state.leftPos;
+    bool& active = isRight ? state.rightActive : state.leftActive;
     Uint8& amp = isRight ? state.rightAmp : state.leftAmp;
-    Uint8& freq = isRight ? state.rightFreq : state.leftFreq;
-
-    Uint8 newMode, newPos, newAmp, newFreq;
+    float& knockPeriodMs = isRight ? state.rightKnockPeriodMs : state.leftKnockPeriodMs;
+    bool& pulseOn = isRight ? state.rightPulseOn : state.leftPulseOn;
+    Uint64& nextToggle = isRight ? state.rightNextToggleTicks : state.leftNextToggleTicks;
 
     if (effect.type == temgi::TriggerEffectType::Vibration)
     {
-        newMode = TRIGGER_MODE_VIBRATION;
-        newPos = TRIGGER_EFFECT_POSITION;
-        newAmp = toByteValue(effect.strength);
-        newFreq = scaleTriggerFrequency(effect.frequency);
+        const bool wasActive = active;
+        active = true;
+        amp = toByteValue(effect.strength);
+        knockPeriodMs = scaleKnockPeriodMs(effect.frequency);
+
+        if (!wasActive)
+        {
+            // Just started: kick off with a knock immediately rather than
+            // waiting for the first gap to elapse.
+            pulseOn = true;
+            nextToggle = SDL_GetTicks() + KNOCK_ON_MS;
+            sendEffects(controllerIndex);
+        }
+        // else: already pulsing - updateTriggerPulses() keeps driving it at
+        // the (possibly just-updated) rate; no need to resend here.
     }
-    else
+    else if (active)
     {
-        newMode = TRIGGER_MODE_OFF;
-        newPos = newAmp = newFreq = 0;
+        // Force one explicit release (enable bit still set, mode=Off) before
+        // dropping active - an unset enable bit means "don't touch", not
+        // "off", so clearing active first would leave it stuck resisting.
+        pulseOn = false;
+        sendEffects(controllerIndex);
+        active = false;
+        nextToggle = 0;
     }
+}
 
-    // MineScene resends the "same" effect every frame while drilling. The
-    // DualSense's own oscillator runs far slower (tens of ms per cycle) than
-    // our frame rate, so re-sending unchanged bytes constantly restarts it
-    // before it can complete a cycle - which is exactly why the felt speed
-    // never changed with drillFps. Only push a new report when it differs.
-    if (mode == newMode && pos == newPos && amp == newAmp && freq == newFreq) return;
+void SDLInput::updateTriggerPulses()
+{
+    const Uint64 now = SDL_GetTicks();
 
-    mode = newMode;
-    pos = newPos;
-    amp = newAmp;
-    freq = newFreq;
+    for (int i = 0; i < MAX_CONTROLLERS; ++i)
+    {
+        GamepadEffects& state = effects_[static_cast<std::size_t>(i)];
+        bool changed = false;
 
-    sendEffects(controllerIndex);
+        if (state.rightActive && now >= state.rightNextToggleTicks)
+        {
+            state.rightPulseOn = !state.rightPulseOn;
+            const Uint64 period = static_cast<Uint64>(state.rightKnockPeriodMs);
+            state.rightNextToggleTicks = now + (state.rightPulseOn ? KNOCK_ON_MS : (period > KNOCK_ON_MS ? period - KNOCK_ON_MS : 1));
+            changed = true;
+        }
+
+        if (state.leftActive && now >= state.leftNextToggleTicks)
+        {
+            state.leftPulseOn = !state.leftPulseOn;
+            const Uint64 period = static_cast<Uint64>(state.leftKnockPeriodMs);
+            state.leftNextToggleTicks = now + (state.leftPulseOn ? KNOCK_ON_MS : (period > KNOCK_ON_MS ? period - KNOCK_ON_MS : 1));
+            changed = true;
+        }
+
+        if (changed) sendEffects(i);
+    }
 }
 
 void SDLInput::sendEffects(int controllerIndex)
@@ -303,20 +358,46 @@ void SDLInput::sendEffects(int controllerIndex)
         data[3] = state.rumbleLow;  // ucRumbleLeft
     }
 
-    if (state.rightMode != TRIGGER_MODE_OFF) enableBits |= TRIGGER_ENABLE_RIGHT;
-    if (state.leftMode != TRIGGER_MODE_OFF) enableBits |= TRIGGER_ENABLE_LEFT;
+    // Verified against pydualsense (a working open-source DualSense library):
+    // the enable bit means "apply the mode/force bytes below", not "trigger is
+    // currently active" - so it must stay set for the whole time we're
+    // managing this trigger, or the firmware just ignores the packet and
+    // keeps whatever resistance was last applied. The actual on/off toggling
+    // has to happen via the MODE byte itself (Feedback vs Off), not the
+    // enable bit - that's the bug that made every knock feel like one
+    // constant, never-releasing resistance instead of a pulse.
+    if (state.rightActive) enableBits |= TRIGGER_ENABLE_RIGHT;
+    if (state.leftActive) enableBits |= TRIGGER_ENABLE_LEFT;
 
     data[0] = enableBits;
 
-    data[TRIGGER_REPORT_OFFSET_RIGHT + 0] = state.rightMode;
-    data[TRIGGER_REPORT_OFFSET_RIGHT + 1] = state.rightPos;
-    data[TRIGGER_REPORT_OFFSET_RIGHT + 2] = state.rightAmp;
-    data[TRIGGER_REPORT_OFFSET_RIGHT + 3] = state.rightFreq;
+    if (state.rightActive)
+    {
+        if (state.rightPulseOn)
+        {
+            data[TRIGGER_REPORT_OFFSET_RIGHT + 0] = TRIGGER_MODE_FEEDBACK;
+            data[TRIGGER_REPORT_OFFSET_RIGHT + 1] = TRIGGER_EFFECT_POSITION;
+            data[TRIGGER_REPORT_OFFSET_RIGHT + 2] = state.rightAmp;
+        }
+        else
+        {
+            data[TRIGGER_REPORT_OFFSET_RIGHT + 0] = TRIGGER_MODE_OFF;
+        }
+    }
 
-    data[TRIGGER_REPORT_OFFSET_LEFT + 0] = state.leftMode;
-    data[TRIGGER_REPORT_OFFSET_LEFT + 1] = state.leftPos;
-    data[TRIGGER_REPORT_OFFSET_LEFT + 2] = state.leftAmp;
-    data[TRIGGER_REPORT_OFFSET_LEFT + 3] = state.leftFreq;
+    if (state.leftActive)
+    {
+        if (state.leftPulseOn)
+        {
+            data[TRIGGER_REPORT_OFFSET_LEFT + 0] = TRIGGER_MODE_FEEDBACK;
+            data[TRIGGER_REPORT_OFFSET_LEFT + 1] = TRIGGER_EFFECT_POSITION;
+            data[TRIGGER_REPORT_OFFSET_LEFT + 2] = state.leftAmp;
+        }
+        else
+        {
+            data[TRIGGER_REPORT_OFFSET_LEFT + 0] = TRIGGER_MODE_OFF;
+        }
+    }
 
     SDL_SendGamepadEffect(gamepad, data, sizeof(data));
 }

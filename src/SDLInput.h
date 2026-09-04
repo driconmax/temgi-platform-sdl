@@ -55,25 +55,37 @@ class SDLInput : public temgi::ControllerBackend
         // otherwise each clobber the other's bytes back to zero. So for PS5
         // gamepads we track the full desired state ourselves and always resend
         // it as a whole (see sendEffects()).
+        //
+        // The firmware's own trigger-effect "frequency" byte does NOT control
+        // oscillation speed, and self-oscillating modes (e.g. "Vibration") have
+        // their own fixed internal buzz rate that dominates regardless of how we
+        // toggle them - both verified by hand. So we drive a static, non-
+        // oscillating resistance ourselves as a series of short "knocks": a
+        // fixed-duration on-pulse (long enough to actually register as felt
+        // resistance) separated by a gap whose length is computed from the
+        // game's requested frequency (see updateTriggerPulses()).
         struct GamepadEffects
         {
             Uint8 rumbleLow = 0;
             Uint8 rumbleHigh = 0;
             Uint64 rumbleExpireTicks = 0; // SDL_GetTicks() deadline; 0 = not decaying
 
-            Uint8 rightMode = 0;
-            Uint8 rightPos = 0;
+            bool rightActive = false;
             Uint8 rightAmp = 0;
-            Uint8 rightFreq = 0;
+            float rightKnockPeriodMs = 0.0f; // full on+off cycle length
+            Uint64 rightNextToggleTicks = 0;
+            bool rightPulseOn = false;
 
-            Uint8 leftMode = 0;
-            Uint8 leftPos = 0;
+            bool leftActive = false;
             Uint8 leftAmp = 0;
-            Uint8 leftFreq = 0;
+            float leftKnockPeriodMs = 0.0f;
+            Uint64 leftNextToggleTicks = 0;
+            bool leftPulseOn = false;
         };
 
         std::array<GamepadEffects, MAX_CONTROLLERS> effects_{};
 
         void sendEffects(int controllerIndex);
         void decayRumble();
+        void updateTriggerPulses();
 };
